@@ -56,44 +56,49 @@ func NewItem(b []byte) funnelsort.Item {
 	return tweetItem(b[0 : 12+l])
 }
 
+func keyTweet(tw *tweetItem) (rout *tweetItem) {
+	et, err := snappy.Encode(nil, *tw)
+	if err != nil {
+		panic(err)
+	}
+	var tweet struct {
+		Created_At string
+	}
+	if err := json.Unmarshal(*tw, &tweet); err == nil {
+		if t, err := time.Parse(time.RubyDate, tweet.Created_At); err == nil {
+			l := len(et)
+			out := make(tweetItem, 12+l)
+
+			key := t.UnixNano()
+			out[0] = byte(key)
+			out[1] = byte(key >> 8)
+			out[2] = byte(key >> 16)
+			out[3] = byte(key >> 24)
+			out[4] = byte(key >> 32)
+			out[5] = byte(key >> 40)
+			out[6] = byte(key >> 48)
+			out[7] = byte(key >> 56)
+
+			out[8] = byte(l)
+			out[9] = byte(l >> 8)
+			out[10] = byte(l >> 16)
+			out[11] = byte(l >> 24)
+
+			copy(out[12:12+l], et)
+
+			rout = &out
+		} else {
+			log.Fatal("Could not parse time:", err)
+		}
+	} else {
+		log.Fatal("Could not unmarshal:", string(*tw))
+	}
+	return
+}
+
 func keyTweets(unkeyedTweets chan tweetItem, tweets chan tweetItem) {
 	for tw := range unkeyedTweets {
-		et, err := snappy.Encode(nil, tw)
-		if err != nil {
-			panic(err)
-		}
-		var tweet struct {
-			Created_At string
-		}
-		if err := json.Unmarshal(tw, &tweet); err == nil {
-			if t, err := time.Parse(time.RubyDate, tweet.Created_At); err == nil {
-				l := len(et)
-				out := make(tweetItem, 12+l)
-
-				key := t.UnixNano()
-				out[0] = byte(key)
-				out[1] = byte(key >> 8)
-				out[2] = byte(key >> 16)
-				out[3] = byte(key >> 24)
-				out[4] = byte(key >> 32)
-				out[5] = byte(key >> 40)
-				out[6] = byte(key >> 48)
-				out[7] = byte(key >> 56)
-
-				out[8] = byte(l)
-				out[9] = byte(l >> 8)
-				out[10] = byte(l >> 16)
-				out[11] = byte(l >> 24)
-
-				copy(out[12:12+l], et)
-
-				tweets <- out
-			} else {
-				log.Fatal(err)
-			}
-		} else {
-			log.Fatal("Could not unmarshal:", string(tw))
-		}
+		tweets <- *keyTweet(&tw)
 	}
 }
 
@@ -132,6 +137,31 @@ func NewTweetReader(reader *bufio.Reader) *TweetReader {
 			}()
 		}
 		wg.Wait()
+		close(tweets)
+	}()
+
+	return &TweetReader{tweets}
+}
+
+func NewTweetReaderSerial(reader *bufio.Reader) *TweetReader {
+	tweets := make(chan tweetItem, 4096)
+
+	go func() {
+		for {
+			if b, isPrefix, err := reader.ReadLine(); err == nil {
+				if isPrefix == true {
+					log.Fatal("line too long")
+				}
+				ti := tweetItem(b)
+				tweets <- *keyTweet(&ti)
+			} else {
+				if err == io.EOF {
+					break
+				} else {
+					log.Fatal("tweet reader ERROR:", err)
+				}
+			}
+		}
 		close(tweets)
 	}()
 
@@ -179,7 +209,7 @@ func GetBuffer(b *s3.Bucket, path string) (buffer funnelsort.Buffer, err error) 
 
 	reader := bufio.NewReaderSize(gr, 16*4096)
 
-	in := NewTweetReader(reader)
+	in := NewTweetReaderSerial(reader)
 
 	buffer = funnelsort.NewBuffer()
 	for {
