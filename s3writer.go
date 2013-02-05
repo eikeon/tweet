@@ -3,7 +3,6 @@ package tweet
 import (
 	"bufio"
 	"compress/gzip"
-	"io"
 	"log"
 	"os"
 	"path"
@@ -20,7 +19,7 @@ type S3TweetWriter struct {
 	current string
 	f       *os.File
 	gw      *gzip.Writer
-	out     io.Writer
+	out     *bufio.Writer
 }
 
 func NewS3TweetWriter(name string, bucket *s3.Bucket) TweetWriter {
@@ -50,10 +49,12 @@ func (w *S3TweetWriter) Write(item funnelsort.Item) {
 }
 
 func (w *S3TweetWriter) Close() {
+	w.out.Flush()
 	w.out = nil
 }
 
 func (w *S3TweetWriter) Flush() {
+	w.Close()
 	err := w.gw.Close()
 	if err != nil {
 		log.Fatal("error closing gzip:", err)
