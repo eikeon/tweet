@@ -214,7 +214,9 @@ func GetReader(b *s3.Bucket, path string) (reader *TweetReader, err error) {
 
 func GetBuffer(b *s3.Bucket, path string) (buffer funnelsort.Buffer, err error) {
 	reader, err := GetReader(b, path)
-
+	if err != nil {
+		return nil, err
+	}
 	buffer = funnelsort.NewBuffer()
 	for {
 		if item := reader.Read(); item != nil {
