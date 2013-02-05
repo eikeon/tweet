@@ -196,7 +196,7 @@ func Merge(buffers []funnelsort.Buffer, out TweetWriter) {
 	out.Flush()
 }
 
-func GetBuffer(b *s3.Bucket, path string) (buffer funnelsort.Buffer, err error) {
+func GetReader(b *s3.Bucket, path string) (reader *TweetReader, err error) {
 	body, err := b.GetReader(path)
 	if err != nil {
 		return nil, err
@@ -207,13 +207,17 @@ func GetBuffer(b *s3.Bucket, path string) (buffer funnelsort.Buffer, err error) 
 		return nil, err
 	}
 
-	reader := bufio.NewReaderSize(gr, 16*4096)
+	reader = NewTweetReaderSerial(bufio.NewReaderSize(gr, 16*4096))
 
-	in := NewTweetReaderSerial(reader)
+	return reader, err
+}
+
+func GetBuffer(b *s3.Bucket, path string) (buffer funnelsort.Buffer, err error) {
+	reader, err := GetReader(b, path)
 
 	buffer = funnelsort.NewBuffer()
 	for {
-		if item := in.Read(); item != nil {
+		if item := reader.Read(); item != nil {
 			buffer.Write(item)
 		} else {
 			break
